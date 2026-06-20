@@ -318,11 +318,8 @@ if norm_file and cand_file and cbt_file:
         })
         st.dataframe(overlap_df, use_container_width=True)
         
-        # Show the exact 3 candidates that are causing the discrepancy
-        st.subheader("🔴 Candidates Causing the 8601 vs 8604 Discrepancy")
-        
-        # The discrepancy is 3 candidates (8604 - 8601 = 3)
-        # These are candidates with missing CBT but NOT missing Norm (or vice versa)
+        # Show the exact candidates causing the discrepancy
+        st.subheader("🔴 Candidates Causing the Discrepancy")
         
         # Candidates with Missing CBT but NOT Missing Norm
         missing_cbt_only = rejected_candidates[
@@ -353,13 +350,21 @@ if norm_file and cand_file and cbt_file:
         col2.metric("Missing CBT Only", len(missing_cbt_only))
         col3.metric("Missing Both", len(missing_both))
         
-        if len(missing_cbt_only) > 0:
-            st.write("**Candidates with Missing CBT Only:**")
-            st.dataframe(missing_cbt_only[["ApplNo", "RollNo", "Name", "DOB"]], use_container_width=True)
+        # Combine the discrepancy candidates
+        discrepancy_candidates = pd.concat([missing_norm_only, missing_cbt_only])
         
-        if len(missing_norm_only) > 0:
-            st.write("**Candidates with Missing Norm Only:**")
-            st.dataframe(missing_norm_only[["ApplNo", "RollNo", "Name", "DOB"]], use_container_width=True)
+        if len(discrepancy_candidates) > 0:
+            st.write(f"**These {len(discrepancy_candidates)} candidates have only ONE of the two issues (causing the 8601 vs 8604 difference):**")
+            display_cols = ["ApplNo", "RollNo", "Name", "DOB", "Missing_Norm", "Missing_CBT", "Invalid_DOB", "Not_Opted_BPharm", "Duplicate_RollNo"]
+            st.dataframe(discrepancy_candidates[display_cols], use_container_width=True)
+            
+            # Download the discrepancy candidates
+            st.download_button(
+                label=f"Download Discrepancy Candidates ({len(discrepancy_candidates)} candidates)",
+                data=discrepancy_candidates[display_cols].to_csv(index=False),
+                file_name="Discrepancy_Candidates.csv",
+                mime="text/csv"
+            )
         
         # Show the exact rejected count
         st.info(f"""
@@ -713,19 +718,86 @@ if norm_file and cand_file and cbt_file:
                             index=False
                         )
                         
-                        # Rejection analysis sheet
-                        rejected_candidates[["ApplNo", "RollNo", "Name", "DOB", "Rejection_Count"]].to_excel(
-                            writer,
-                            sheet_name='Rejected_Candidates',
-                            index=False
-                        )
+                        # Rejected candidates sheet
+                        if len(rejected_candidates) > 0:
+                            rejected_export = rejected_candidates[["ApplNo", "RollNo", "Name", "DOB", "Rejection_Count"]].copy()
+                            rejected_export["Rejection_Reasons"] = ""
+                            
+                            # Add reason descriptions
+                            rejected_export.loc[rejected_export["Rejection_Count"] >= 1, "Rejection_Reasons"] = ""
+                            
+                            # Build reason strings
+                            for idx in rejected_export.index:
+                                reasons = []
+                                if rejected_export.loc[idx, "ApplNo"] in missing_norm["ApplNo"].values:
+                                    reasons.append("Missing Norm Score")
+                                if rejected_export.loc[idx, "ApplNo"] in missing_cbt["ApplNo"].values:
+                                    reasons.append("Missing CBT")
+                                if rejected_export.loc[idx, "ApplNo"] in invalid_dob["ApplNo"].values:
+                                    reasons.append("Invalid DOB")
+                                if rejected_export.loc[idx, "ApplNo"] in not_opted["ApplNo"].values:
+                                    reasons.append("Not Opted BPharm")
+                                if rejected_export.loc[idx, "ApplNo"] in dup_rolls["ApplNo"].values:
+                                    reasons.append("Duplicate RollNo")
+                                rejected_export.loc[idx, "Rejection_Reasons"] = ", ".join(reasons)
+                            
+                            rejected_export.to_excel(
+                                writer,
+                                sheet_name='Rejected_Candidates',
+                                index=False
+                            )
+                        
+                        # Discrepancy candidates sheet (the 3 candidates)
+                        if len(discrepancy_candidates) > 0:
+                            discrepancy_cols = ["ApplNo", "RollNo", "Name", "DOB", "Missing_Norm", "Missing_CBT", "Invalid_DOB", "Not_Opted_BPharm", "Duplicate_RollNo"]
+                            discrepancy_candidates[discrepancy_cols].to_excel(
+                                writer,
+                                sheet_name='Discrepancy_3_Candidates',
+                                index=False
+                            )
+                        
+                        # Individual issue sheets
+                        if len(missing_norm) > 0:
+                            missing_norm[["ApplNo", "RollNo", "Name", "DOB"]].to_excel(
+                                writer,
+                                sheet_name='Missing_Norm_Score',
+                                index=False
+                            )
+                        
+                        if len(missing_cbt) > 0:
+                            missing_cbt[["ApplNo", "RollNo", "Name", "DOB"]].to_excel(
+                                writer,
+                                sheet_name='Missing_CBT',
+                                index=False
+                            )
+                        
+                        if len(invalid_dob) > 0:
+                            invalid_dob[["ApplNo", "RollNo", "Name", "DOB"]].to_excel(
+                                writer,
+                                sheet_name='Invalid_DOB',
+                                index=False
+                            )
+                        
+                        if len(not_opted) > 0:
+                            not_opted[["ApplNo", "RollNo", "Name", "DOB", "BPharm"]].to_excel(
+                                writer,
+                                sheet_name='Not_Opted_BPharm',
+                                index=False
+                            )
+                        
+                        if len(dup_rolls) > 0:
+                            dup_rolls[["ApplNo", "RollNo", "Name", "DOB"]].to_excel(
+                                writer,
+                                sheet_name='Duplicate_RollNos',
+                                index=False
+                            )
                     
                     output.seek(0)
                     
                     st.download_button(
-                        label="Download B.Pharm Rank List (Excel)",
+                        label="Download Complete Excel Report (All Sheets)",
                         data=output,
-                        file_name="BPHARM_RANKLIST.xlsx",
+                        file_name="BPHARM_Complete_Report.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 except Exception as excel_error:
