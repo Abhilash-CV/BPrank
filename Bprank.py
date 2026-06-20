@@ -160,60 +160,6 @@ if norm_file and cand_file and cbt_file:
         )
 
         # ==================================================
-        # DEBUGGING SECTION - Check each eligibility step
-        # ==================================================
-        
-        st.header("🔍 Eligibility Debugging")
-        
-        # Step 1: Check BPharm column
-        st.subheader("1. BPharm Column Analysis")
-        bpharm_values = cand_df["BPharm"].fillna("").astype(str).str.upper().value_counts()
-        st.write("Unique values in BPharm column:", cand_df["BPharm"].unique())
-        st.dataframe(pd.DataFrame({
-            "BPharm Value": bpharm_values.index,
-            "Count": bpharm_values.values
-        }))
-        
-        bpharm_eligible = cand_df[cand_df["BPharm"].fillna("").str.upper() == "Y"]
-        st.write(f"Candidates with BPharm='Y': {len(bpharm_eligible)}")
-        
-        # Step 2: Check DOB
-        st.subheader("2. DOB Analysis")
-        dob_valid = cand_df[cand_df["DOB_Parsed"].notna()]
-        st.write(f"Candidates with valid DOB: {len(dob_valid)}")
-        
-        # Step 3: Check RollNo matches in norm_df
-        st.subheader("3. RollNo Match Analysis")
-        st.write(f"Total RollNos in Candidates: {len(cand_df)}")
-        st.write(f"Total RollNos in Normalization: {len(norm_df)}")
-        st.write(f"Unique RollNos in Candidates: {cand_df['RollNo'].nunique()}")
-        st.write(f"Unique RollNos in Normalization: {norm_df['RollNo'].nunique()}")
-        
-        rollno_in_norm = cand_df[cand_df["RollNo"].isin(norm_df["RollNo"])]
-        st.write(f"Candidates with RollNo in Normalization: {len(rollno_in_norm)}")
-        
-        # Show sample of RollNos from each file
-        st.write("Sample RollNos from Candidates:", cand_df["RollNo"].head(10).tolist())
-        st.write("Sample RollNos from Normalization:", norm_df["RollNo"].head(10).tolist())
-        
-        # Step 4: Check RollNo matches in cbt_df
-        st.subheader("4. CBT RollNo Match Analysis")
-        st.write(f"Total RollNos in CBT: {len(cbt_df)}")
-        st.write(f"Unique RollNos in CBT: {cbt_df['RollNo'].nunique()}")
-        
-        rollno_in_cbt = cand_df[cand_df["RollNo"].isin(cbt_df["RollNo"])]
-        st.write(f"Candidates with RollNo in CBT: {len(rollno_in_cbt)}")
-        
-        st.write("Sample RollNos from CBT:", cbt_df["RollNo"].head(10).tolist())
-        
-        # Step 5: Check duplicate RollNos
-        st.subheader("5. Duplicate RollNo Analysis")
-        dup_rolls = cand_df[cand_df.duplicated(subset=["RollNo"], keep=False)]
-        st.write(f"Candidates with duplicate RollNo: {len(dup_rolls)}")
-        if len(dup_rolls) > 0:
-            st.write("Sample duplicates:", dup_rolls.head())
-
-        # ==================================================
         # VALIDATIONS
         # ==================================================
 
@@ -312,6 +258,118 @@ if norm_file and cand_file and cbt_file:
         validation_results[
             "Negative Normalized Scores"
         ] = negative_norm
+
+        # ==================================================
+        # DETAILED REJECTION ANALYSIS
+        # ==================================================
+        
+        st.header("🔍 Detailed Rejection Analysis")
+        
+        # Create a comprehensive rejection dataframe
+        rejection_analysis = cand_df.copy()
+        rejection_analysis["Missing_Norm"] = ~rejection_analysis["RollNo"].isin(norm_df["RollNo"])
+        rejection_analysis["Missing_CBT"] = ~rejection_analysis["RollNo"].isin(cbt_df["RollNo"])
+        rejection_analysis["Invalid_DOB"] = rejection_analysis["DOB_Parsed"].isna()
+        rejection_analysis["Not_Opted_BPharm"] = rejection_analysis["BPharm"].fillna("").str.upper() != "Y"
+        rejection_analysis["Duplicate_RollNo"] = rejection_analysis["RollNo"].isin(dup_rolls["RollNo"])
+        
+        # Count how many rejection reasons each candidate has
+        rejection_analysis["Rejection_Count"] = (
+            rejection_analysis["Missing_Norm"].astype(int) +
+            rejection_analysis["Missing_CBT"].astype(int) +
+            rejection_analysis["Invalid_DOB"].astype(int) +
+            rejection_analysis["Not_Opted_BPharm"].astype(int) +
+            rejection_analysis["Duplicate_RollNo"].astype(int)
+        )
+        
+        # Filter only rejected candidates
+        rejected_candidates = rejection_analysis[rejection_analysis["Rejection_Count"] > 0]
+        
+        st.subheader(f"Total Rejected Candidates: {len(rejected_candidates)}")
+        
+        # Breakdown by rejection reason
+        st.subheader("Rejection Reasons Breakdown")
+        
+        reason_breakdown = pd.DataFrame({
+            "Rejection Reason": [
+                "Missing Normalized Score",
+                "Missing CBT Responses", 
+                "Invalid DOB",
+                "Not Opted B.Pharm",
+                "Duplicate Roll Number"
+            ],
+            "Count": [
+                len(missing_norm),
+                len(missing_cbt),
+                len(invalid_dob),
+                len(not_opted),
+                len(dup_rolls)
+            ]
+        })
+        st.dataframe(reason_breakdown, use_container_width=True)
+        
+        # Show overlap between reasons
+        st.subheader("Overlap Analysis (Candidates with Multiple Issues)")
+        
+        overlap_summary = rejection_analysis[rejection_analysis["Rejection_Count"] > 0]["Rejection_Count"].value_counts().sort_index()
+        overlap_df = pd.DataFrame({
+            "Number of Issues": overlap_summary.index,
+            "Candidates": overlap_summary.values
+        })
+        st.dataframe(overlap_df, use_container_width=True)
+        
+        # Show the exact 3 candidates that are causing the discrepancy
+        st.subheader("🔴 Candidates Causing the 8601 vs 8604 Discrepancy")
+        
+        # The discrepancy is 3 candidates (8604 - 8601 = 3)
+        # These are candidates with missing CBT but NOT missing Norm (or vice versa)
+        
+        # Candidates with Missing CBT but NOT Missing Norm
+        missing_cbt_only = rejected_candidates[
+            (rejected_candidates["Missing_CBT"] == True) &
+            (rejected_candidates["Missing_Norm"] == False) &
+            (rejected_candidates["Invalid_DOB"] == False) &
+            (rejected_candidates["Not_Opted_BPharm"] == False) &
+            (rejected_candidates["Duplicate_RollNo"] == False)
+        ]
+        
+        # Candidates with Missing Norm but NOT Missing CBT
+        missing_norm_only = rejected_candidates[
+            (rejected_candidates["Missing_Norm"] == True) &
+            (rejected_candidates["Missing_CBT"] == False) &
+            (rejected_candidates["Invalid_DOB"] == False) &
+            (rejected_candidates["Not_Opted_BPharm"] == False) &
+            (rejected_candidates["Duplicate_RollNo"] == False)
+        ]
+        
+        # Candidates with both missing
+        missing_both = rejected_candidates[
+            (rejected_candidates["Missing_Norm"] == True) &
+            (rejected_candidates["Missing_CBT"] == True)
+        ]
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Missing Norm Only", len(missing_norm_only))
+        col2.metric("Missing CBT Only", len(missing_cbt_only))
+        col3.metric("Missing Both", len(missing_both))
+        
+        if len(missing_cbt_only) > 0:
+            st.write("**Candidates with Missing CBT Only:**")
+            st.dataframe(missing_cbt_only[["ApplNo", "RollNo", "Name", "DOB"]], use_container_width=True)
+        
+        if len(missing_norm_only) > 0:
+            st.write("**Candidates with Missing Norm Only:**")
+            st.dataframe(missing_norm_only[["ApplNo", "RollNo", "Name", "DOB"]], use_container_width=True)
+        
+        # Show the exact rejected count
+        st.info(f"""
+        **Explanation:**
+        - Missing Normalized Scores: {len(missing_norm)} candidates
+        - Missing CBT Responses: {len(missing_cbt)} candidates
+        - Total unique rejected candidates: {len(rejected_candidates)}
+        
+        The difference ({len(missing_norm) + len(missing_cbt) - len(rejected_candidates)}) is the number of candidates who have BOTH issues.
+        """)
 
         # ==================================================
         # VALIDATION SUMMARY
@@ -571,13 +629,13 @@ if norm_file and cand_file and cbt_file:
                 height=600
             )
         else:
-            st.warning("No eligible candidates found. Please check the debugging section above.")
+            st.warning("No eligible candidates found. Please check the validation section.")
 
         # ==================================================
         # STATISTICS
         # ==================================================
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         col1.metric(
             "Total Candidates",
@@ -594,12 +652,18 @@ if norm_file and cand_file and cbt_file:
             len(cand_df) - len(rank_df)
         )
         
+        col4.metric(
+            "Unique Rejection Reasons",
+            len(rejected_candidates)
+        )
+        
         # Category-wise statistics
-        st.subheader("Category-wise Statistics")
-        if "Category" in rank_df.columns and len(rank_df) > 0:
-            category_stats = rank_df["Category"].value_counts().reset_index()
-            category_stats.columns = ["Category", "Count"]
-            st.dataframe(category_stats, use_container_width=True)
+        if len(rank_df) > 0:
+            st.subheader("Category-wise Statistics")
+            if "Category" in rank_df.columns:
+                category_stats = rank_df["Category"].value_counts().reset_index()
+                category_stats.columns = ["Category", "Count"]
+                st.dataframe(category_stats, use_container_width=True)
         
         # ==================================================
         # DOWNLOAD - CSV
@@ -646,6 +710,13 @@ if norm_file and cand_file and cbt_file:
                         summary_df.to_excel(
                             writer, 
                             sheet_name='Validation_Summary', 
+                            index=False
+                        )
+                        
+                        # Rejection analysis sheet
+                        rejected_candidates[["ApplNo", "RollNo", "Name", "DOB", "Rejection_Count"]].to_excel(
+                            writer,
+                            sheet_name='Rejected_Candidates',
                             index=False
                         )
                     
