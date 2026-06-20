@@ -2,6 +2,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from io import BytesIO
+import sys
+
+# Check if openpyxl is installed, if not, install it
+try:
+    import openpyxl
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
+    import openpyxl
 
 st.set_page_config(
     page_title="B.Pharm Rank List Generator",
@@ -296,28 +305,6 @@ if norm_file and cand_file and cbt_file:
             "Reason"
         ] += "Invalid DOB; "
         
-        # Add condition for normalized score <= 5 (for non-SC/ST)
-        # First, merge norm scores
-        rejection_df = rejection_df.merge(
-            norm_df[["RollNo", "Norm_Score"]],
-            on="RollNo",
-            how="left"
-        )
-        
-        # Check if Category column exists, if not create it
-        if "Category" not in rejection_df.columns:
-            rejection_df["Category"] = ""
-        
-        mask = (
-            (~rejection_df["Category"].fillna("").str.upper().isin(["SC", "ST"])) &
-            (rejection_df["Norm_Score"].fillna(0) <= 10)
-        )
-        
-        rejection_df.loc[
-            mask,
-            "Reason"
-        ] += "Normalized Score <= 10; "
-        
         with st.expander(
             "View Validation Errors"
         ):
@@ -463,13 +450,6 @@ if norm_file and cand_file and cbt_file:
             errors="coerce"
         ).fillna(0)
         
-        # Minimum score eligibility (≤5 rejected for non-SC/ST)
-        rank_df["MinScoreEligible"] = np.where(
-            rank_df["Category"].isin(["SC", "ST"]),
-            True,
-            rank_df["Norm_Score"] >= 10
-        )
-        
         for col in numeric_cols:
             if col in rank_df.columns:
                 rank_df[col] = rank_df[col].fillna(0)
@@ -496,14 +476,6 @@ if norm_file and cand_file and cbt_file:
                 True
             ]
         )
-        
-        below_min_score = rank_df[
-            rank_df["MinScoreEligible"] == False
-        ]
-        
-        rank_df = rank_df[
-            rank_df["MinScoreEligible"] == True
-        ]
         
         # ==================================================
         # GENERATE BRANK
@@ -548,7 +520,7 @@ if norm_file and cand_file and cbt_file:
         # STATISTICS
         # ==================================================
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
 
         col1.metric(
             "Total Candidates",
@@ -563,11 +535,6 @@ if norm_file and cand_file and cbt_file:
         col3.metric(
             "Rejected Candidates",
             len(cand_df) - len(rank_df)
-        )
-        
-        col4.metric(
-            "Below Minimum Score (≤10)",
-            len(below_min_score)
         )
         
         # Category-wise statistics
@@ -596,49 +563,45 @@ if norm_file and cand_file and cbt_file:
             )
         
         with col_excel:
-            # Create Excel file with multiple sheets
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Main rank list sheet with Category column
-                rank_df[available_columns].to_excel(
-                    writer, 
-                    sheet_name='BPharm_Rank_List', 
-                    index=False
-                )
-                
-                # Category statistics sheet
-                if "Category" in rank_df.columns:
-                    category_stats = rank_df["Category"].value_counts().reset_index()
-                    category_stats.columns = ["Category", "Count"]
-                    category_stats.to_excel(
+            try:
+                # Create Excel file with multiple sheets
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    # Main rank list sheet with Category column
+                    rank_df[available_columns].to_excel(
                         writer, 
-                        sheet_name='Category_Statistics', 
+                        sheet_name='BPharm_Rank_List', 
+                        index=False
+                    )
+                    
+                    # Category statistics sheet
+                    if "Category" in rank_df.columns:
+                        category_stats = rank_df["Category"].value_counts().reset_index()
+                        category_stats.columns = ["Category", "Count"]
+                        category_stats.to_excel(
+                            writer, 
+                            sheet_name='Category_Statistics', 
+                            index=False
+                        )
+                    
+                    # Validation summary sheet
+                    summary_df.to_excel(
+                        writer, 
+                        sheet_name='Validation_Summary', 
                         index=False
                     )
                 
-                # Below minimum score candidates sheet
-                if len(below_min_score) > 0:
-                    below_min_score[available_columns].to_excel(
-                        writer, 
-                        sheet_name='Below_Min_Score', 
-                        index=False
-                    )
+                output.seek(0)
                 
-                # Validation summary sheet
-                summary_df.to_excel(
-                    writer, 
-                    sheet_name='Validation_Summary', 
-                    index=False
+                st.download_button(
+                    label="Download B.Pharm Rank List (Excel)",
+                    data=output,
+                    file_name="BPHARM_RANKLIST.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-            
-            output.seek(0)
-            
-            st.download_button(
-                label="Download B.Pharm Rank List (Excel)",
-                data=output,
-                file_name="BPHARM_RANKLIST.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            except Exception as excel_error:
+                st.warning(f"Excel export failed: {str(excel_error)}")
+                st.info("Please use the CSV download option instead.")
 
         # ==================================================
         # SQL UPDATE FILE
