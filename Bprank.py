@@ -574,7 +574,6 @@ if norm_file and cand_file and cbt_file:
         # ==================================================
         # SORTING AS PER PROSPECTUS
         # ==================================================
-
         rank_df = rank_df.sort_values(
             by=[
                 "Norm_Score",
@@ -582,15 +581,17 @@ if norm_file and cand_file and cbt_file:
                 "Phy_Score",
                 "Chem_Correct",
                 "Phy_Correct",
-                "DOB_Parsed"
+                "DOB_Parsed",
+                "Name"  # Added Name as final tie-breaker
             ],
             ascending=[
-                False,
-                False,
-                False,
-                False,
-                False,
-                True
+                False,  # Norm_Score - highest first
+                False,  # Chem_Score - highest first
+                False,  # Phy_Score - highest first
+                False,  # Chem_Correct - highest first
+                False,  # Phy_Correct - highest first
+                True,   # DOB_Parsed - oldest first
+                True    # Name - alphabetical order (A to Z)
             ]
         )
         
