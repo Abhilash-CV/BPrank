@@ -160,6 +160,60 @@ if norm_file and cand_file and cbt_file:
         )
 
         # ==================================================
+        # DEBUGGING SECTION - Check each eligibility step
+        # ==================================================
+        
+        st.header("🔍 Eligibility Debugging")
+        
+        # Step 1: Check BPharm column
+        st.subheader("1. BPharm Column Analysis")
+        bpharm_values = cand_df["BPharm"].fillna("").astype(str).str.upper().value_counts()
+        st.write("Unique values in BPharm column:", cand_df["BPharm"].unique())
+        st.dataframe(pd.DataFrame({
+            "BPharm Value": bpharm_values.index,
+            "Count": bpharm_values.values
+        }))
+        
+        bpharm_eligible = cand_df[cand_df["BPharm"].fillna("").str.upper() == "Y"]
+        st.write(f"Candidates with BPharm='Y': {len(bpharm_eligible)}")
+        
+        # Step 2: Check DOB
+        st.subheader("2. DOB Analysis")
+        dob_valid = cand_df[cand_df["DOB_Parsed"].notna()]
+        st.write(f"Candidates with valid DOB: {len(dob_valid)}")
+        
+        # Step 3: Check RollNo matches in norm_df
+        st.subheader("3. RollNo Match Analysis")
+        st.write(f"Total RollNos in Candidates: {len(cand_df)}")
+        st.write(f"Total RollNos in Normalization: {len(norm_df)}")
+        st.write(f"Unique RollNos in Candidates: {cand_df['RollNo'].nunique()}")
+        st.write(f"Unique RollNos in Normalization: {norm_df['RollNo'].nunique()}")
+        
+        rollno_in_norm = cand_df[cand_df["RollNo"].isin(norm_df["RollNo"])]
+        st.write(f"Candidates with RollNo in Normalization: {len(rollno_in_norm)}")
+        
+        # Show sample of RollNos from each file
+        st.write("Sample RollNos from Candidates:", cand_df["RollNo"].head(10).tolist())
+        st.write("Sample RollNos from Normalization:", norm_df["RollNo"].head(10).tolist())
+        
+        # Step 4: Check RollNo matches in cbt_df
+        st.subheader("4. CBT RollNo Match Analysis")
+        st.write(f"Total RollNos in CBT: {len(cbt_df)}")
+        st.write(f"Unique RollNos in CBT: {cbt_df['RollNo'].nunique()}")
+        
+        rollno_in_cbt = cand_df[cand_df["RollNo"].isin(cbt_df["RollNo"])]
+        st.write(f"Candidates with RollNo in CBT: {len(rollno_in_cbt)}")
+        
+        st.write("Sample RollNos from CBT:", cbt_df["RollNo"].head(10).tolist())
+        
+        # Step 5: Check duplicate RollNos
+        st.subheader("5. Duplicate RollNo Analysis")
+        dup_rolls = cand_df[cand_df.duplicated(subset=["RollNo"], keep=False)]
+        st.write(f"Candidates with duplicate RollNo: {len(dup_rolls)}")
+        if len(dup_rolls) > 0:
+            st.write("Sample duplicates:", dup_rolls.head())
+
+        # ==================================================
         # VALIDATIONS
         # ==================================================
 
@@ -510,11 +564,14 @@ if norm_file and cand_file and cbt_file:
         # Ensure all columns exist
         available_columns = [col for col in final_columns if col in rank_df.columns]
         
-        st.dataframe(
-            rank_df[available_columns],
-            use_container_width=True,
-            height=600
-        )
+        if len(rank_df) > 0:
+            st.dataframe(
+                rank_df[available_columns],
+                use_container_width=True,
+                height=600
+            )
+        else:
+            st.warning("No eligible candidates found. Please check the debugging section above.")
 
         # ==================================================
         # STATISTICS
@@ -539,7 +596,7 @@ if norm_file and cand_file and cbt_file:
         
         # Category-wise statistics
         st.subheader("Category-wise Statistics")
-        if "Category" in rank_df.columns:
+        if "Category" in rank_df.columns and len(rank_df) > 0:
             category_stats = rank_df["Category"].value_counts().reset_index()
             category_stats.columns = ["Category", "Count"]
             st.dataframe(category_stats, use_container_width=True)
@@ -548,88 +605,89 @@ if norm_file and cand_file and cbt_file:
         # DOWNLOAD - CSV
         # ==================================================
 
-        st.subheader("Download Options")
-        
-        col_csv, col_excel = st.columns(2)
-        
-        with col_csv:
-            st.download_button(
-                label="Download B.Pharm Rank List (CSV)",
-                data=rank_df[
-                    available_columns
-                ].to_csv(index=False),
-                file_name="BPHARM_RANKLIST.csv",
-                mime="text/csv"
-            )
-        
-        with col_excel:
-            try:
-                # Create Excel file with multiple sheets
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    # Main rank list sheet with Category column
-                    rank_df[available_columns].to_excel(
-                        writer, 
-                        sheet_name='BPharm_Rank_List', 
-                        index=False
-                    )
-                    
-                    # Category statistics sheet
-                    if "Category" in rank_df.columns:
-                        category_stats = rank_df["Category"].value_counts().reset_index()
-                        category_stats.columns = ["Category", "Count"]
-                        category_stats.to_excel(
+        if len(rank_df) > 0:
+            st.subheader("Download Options")
+            
+            col_csv, col_excel = st.columns(2)
+            
+            with col_csv:
+                st.download_button(
+                    label="Download B.Pharm Rank List (CSV)",
+                    data=rank_df[
+                        available_columns
+                    ].to_csv(index=False),
+                    file_name="BPHARM_RANKLIST.csv",
+                    mime="text/csv"
+                )
+            
+            with col_excel:
+                try:
+                    # Create Excel file with multiple sheets
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # Main rank list sheet with Category column
+                        rank_df[available_columns].to_excel(
                             writer, 
-                            sheet_name='Category_Statistics', 
+                            sheet_name='BPharm_Rank_List', 
+                            index=False
+                        )
+                        
+                        # Category statistics sheet
+                        if "Category" in rank_df.columns:
+                            category_stats = rank_df["Category"].value_counts().reset_index()
+                            category_stats.columns = ["Category", "Count"]
+                            category_stats.to_excel(
+                                writer, 
+                                sheet_name='Category_Statistics', 
+                                index=False
+                            )
+                        
+                        # Validation summary sheet
+                        summary_df.to_excel(
+                            writer, 
+                            sheet_name='Validation_Summary', 
                             index=False
                         )
                     
-                    # Validation summary sheet
-                    summary_df.to_excel(
-                        writer, 
-                        sheet_name='Validation_Summary', 
-                        index=False
+                    output.seek(0)
+                    
+                    st.download_button(
+                        label="Download B.Pharm Rank List (Excel)",
+                        data=output,
+                        file_name="BPHARM_RANKLIST.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
-                
-                output.seek(0)
-                
+                except Exception as excel_error:
+                    st.warning(f"Excel export failed: {str(excel_error)}")
+                    st.info("Please use the CSV download option instead.")
+
+            # ==================================================
+            # SQL UPDATE FILE
+            # ==================================================
+
+            if "ApplNo" in rank_df.columns and "BRank" in rank_df.columns:
+                sql_df = rank_df[
+                    ["ApplNo", "BRank"]
+                ]
+
+                sql_lines = []
+
+                for _, row in sql_df.iterrows():
+
+                    sql_lines.append(
+                        f"UPDATE candidates "
+                        f"SET BRank={int(row['BRank'])} "
+                        f"WHERE ApplNo='{row['ApplNo']}';"
+                    )
+
+                sql_text = "\n".join(sql_lines)
+
                 st.download_button(
-                    label="Download B.Pharm Rank List (Excel)",
-                    data=output,
-                    file_name="BPHARM_RANKLIST.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    label="Download BRank Update SQL",
+                    data=sql_text,
+                    file_name="Update_BRank.sql",
+                    mime="text/plain"
                 )
-            except Exception as excel_error:
-                st.warning(f"Excel export failed: {str(excel_error)}")
-                st.info("Please use the CSV download option instead.")
-
-        # ==================================================
-        # SQL UPDATE FILE
-        # ==================================================
-
-        if "ApplNo" in rank_df.columns and "BRank" in rank_df.columns:
-            sql_df = rank_df[
-                ["ApplNo", "BRank"]
-            ]
-
-            sql_lines = []
-
-            for _, row in sql_df.iterrows():
-
-                sql_lines.append(
-                    f"UPDATE candidates "
-                    f"SET BRank={int(row['BRank'])} "
-                    f"WHERE ApplNo='{row['ApplNo']}';"
-                )
-
-            sql_text = "\n".join(sql_lines)
-
-            st.download_button(
-                label="Download BRank Update SQL",
-                data=sql_text,
-                file_name="Update_BRank.sql",
-                mime="text/plain"
-            )
 
     except Exception as e:
 
